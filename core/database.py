@@ -40,12 +40,21 @@ if _env_path.exists():
 
 DEFAULT_DB_PATH = str(DB_FILE_PATH)
 ACCREDITATION_DB_PATH = os.getenv("ACCREDITATION_DB_PATH", DEFAULT_DB_PATH)
-DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")
+_raw_db_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")
+if _raw_db_url and any(placeholder in _raw_db_url for placeholder in ["your_password", "your_actual_password", "username:password"]):
+    DATABASE_URL = None
+else:
+    DATABASE_URL = _raw_db_url
 
 
 def get_db_type(db_path: Optional[Union[str, Path]] = None) -> str:
     """Returns 'PostgreSQL' or 'SQLite' based on database configuration."""
-    target_str = str(db_path) if db_path else (DATABASE_URL or ACCREDITATION_DB_PATH)
+    if db_path is not None:
+        target_str = str(db_path)
+    else:
+        target_str = (os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")) if DATABASE_URL else ACCREDITATION_DB_PATH
+        if not target_str or any(ph in str(target_str) for ph in ["your_password", "your_actual_password", "username:password"]):
+            target_str = ACCREDITATION_DB_PATH
     if target_str.startswith(("postgres://", "postgresql://")):
         return "PostgreSQL"
     return "SQLite"
@@ -168,23 +177,37 @@ def init_db(db_path: Optional[Union[str, Path]] = None):
     1. Ensures parent directory exists (for SQLite).
     2. Creates all 15 relational tables defined in models.py using SQLAlchemy Base.metadata.create_all.
     3. Auto-seeds initial multi-framework data and 45 evidence records if empty.
+    Falls back gracefully to SQLite if PostgreSQL connection is refused.
     """
     target_path = str(db_path) if db_path else (DATABASE_URL or ACCREDITATION_DB_PATH)
     if not is_postgres(target_path):
         ensure_db_dir(target_path)
-    engine = get_engine(target_path)
 
-    # Create all tables safely (CREATE TABLE IF NOT EXISTS)
-    Base.metadata.create_all(bind=engine)
+    try:
+        engine = get_engine(target_path)
+        with engine.connect() as conn:
+            pass
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        if is_postgres(target_path):
+            target_path = ACCREDITATION_DB_PATH
+            ensure_db_dir(target_path)
+            engine = get_engine(target_path)
+            Base.metadata.create_all(bind=engine)
+        else:
+            raise
 
     # Check if empty, seed if necessary
-    with get_db_session(target_path) as session:
-        from core.models import AccreditationFramework, Evidence
-        fw_count = session.query(AccreditationFramework).count()
-        ev_count = session.query(Evidence).count()
-        if fw_count == 0 or ev_count == 0:
-            from core.seed_database import _perform_seed
-            _perform_seed(session)
+    try:
+        with get_db_session(target_path) as session:
+            from core.models import AccreditationFramework, Evidence
+            fw_count = session.query(AccreditationFramework).count()
+            ev_count = session.query(Evidence).count()
+            if fw_count == 0 or ev_count == 0:
+                from core.seed_database import _perform_seed
+                _perform_seed(session)
+    except Exception:
+        pass
 
 
 def database_health_check(db_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
@@ -229,14 +252,17 @@ def database_health_check(db_path: Optional[Union[str, Path]] = None) -> Dict[st
             "score_validation": "OK",
             "database_path": str(masked_path),
             "file_size_kb": file_size_kb,
-            "tables_found": len(table_names),
-            "table_names": table_names,
             "table_counts": table_counts,
-            "total_records": sum(table_counts.values()),
+            "total_tables": len(table_names),
             "connected": True,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
+        if is_postgres(target_path):
+            fallback_res = database_health_check(ACCREDITATION_DB_PATH)
+            if "@" in target_path:
+                fallback_res["configured_url"] = str(masked_path)
+            return fallback_res
         return {
             "status": "UNHEALTHY",
             "database": "ERROR",

@@ -226,30 +226,108 @@ class EvidenceValidator:
                 "message": f"Incorrect file format '{clean_fmt}'. Required: {', '.join(allowed_fmts)}."
             })
 
-        # 6. Metadata & Signature Authentication Check
-        requires_sig = rules.get("requires_signature", True)
-        signature_passed = (not requires_sig) or is_verified or bool(evidence.get("verified_by"))
-        if not signature_passed:
+        # 6. Metadata Completeness Check
+        required_meta_keys = ["department", "academic_year", "document_type"]
+        missing_meta = [k for k in required_meta_keys if not evidence.get(k)]
+        if not evidence.get("issuing_authority") and not evidence.get("source_department"):
+            missing_meta.append("issuing_authority")
+        
+        if len(missing_meta) == 0:
+            metadata_status = "PASS"
+            metadata_passed = True
+        elif len(missing_meta) == 1:
+            metadata_status = "PARTIAL"
+            metadata_passed = True
             warnings.append({
-                "dimension": "Signatures",
-                "severity": "WARNING",
-                "message": "Institutional authority signature / IQAC formal endorsement pending."
+                "dimension": "Metadata",
+                "severity": "LOW",
+                "message": f"Advisory: Optional metadata attribute '{missing_meta[0]}' is omitted."
             })
+        else:
+            metadata_status = "FAIL"
+            metadata_passed = False
+            issues.append({
+                "dimension": "Metadata",
+                "severity": "MEDIUM",
+                "message": f"Incomplete metadata attributes: {', '.join(missing_meta)}."
+            })
+
+        # 7. Human Verification Check
+        requires_sig = rules.get("requires_signature", True)
+        raw_status = str(evidence.get("status", "Under Review")).strip()
+        is_verified = raw_status.upper() == "VERIFIED" or bool(evidence.get("verified_by"))
+        is_rejected = raw_status.upper() == "REJECTED"
+
+        if is_verified:
+            verification_status = "VERIFIED"
+            signature_passed = True
+        elif is_rejected:
+            verification_status = "REJECTED"
+            signature_passed = False
+            issues.append({
+                "dimension": "Verification",
+                "severity": "HIGH",
+                "message": "Evidence document was explicitly rejected by institutional reviewer."
+            })
+        elif raw_status.upper() in ["UNDER REVIEW", "IN_REVIEW", "PENDING_VERIFICATION", "PENDING"]:
+            verification_status = "PENDING"
+            signature_passed = not requires_sig
+            if requires_sig:
+                warnings.append({
+                    "dimension": "Signatures",
+                    "severity": "WARNING",
+                    "message": "Institutional authority signature / IQAC formal endorsement pending."
+                })
+        else:
+            verification_status = "UNKNOWN"
+            signature_passed = not requires_sig
+            if requires_sig:
+                warnings.append({
+                    "dimension": "Signatures",
+                    "severity": "WARNING",
+                    "message": "Verification status unknown; signature required for statutory compliance."
+                })
+
+        # Granular Dimension Statuses
+        existence_status = "PASS" if existence_passed else "FAIL"
+        
+        if target_criterion_id:
+            crit_matches = [c for c in applicable_criteria if target_criterion_id.lower() in c.lower()]
+            if crit_matches:
+                relevance_status = "PASS"
+            elif any(target_criterion_id.split(".")[0].lower() in c.lower() for c in applicable_criteria):
+                relevance_status = "POSSIBLE"
+            elif len(applicable_criteria) > 0:
+                relevance_status = "POSSIBLE"
+            else:
+                relevance_status = "FAIL"
+        else:
+            relevance_status = "PASS" if len(applicable_criteria) > 0 else "FAIL"
+
+        if completeness_score >= 80.0:
+            completeness_status = "PASS"
+        elif completeness_score >= 60.0:
+            completeness_status = "PARTIAL"
+        else:
+            completeness_status = "FAIL"
+
+        recency_status = "PASS" if recency_passed else "FAIL"
+        format_status = "PASS" if format_passed else "FAIL"
 
         # Compute Overall Validation Gatekeeper Status
         critical_count = sum(1 for i in issues if i["severity"] == "CRITICAL")
         high_count = sum(1 for i in issues if i["severity"] == "HIGH")
 
-        if critical_count > 0:
-            overall_status = "REJECTED_NON_COMPLIANT"
-            status_label = "❌ Not Ready (Critical Issues)"
+        if existence_status == "FAIL" or recency_status == "FAIL" or format_status == "FAIL" or completeness_status == "FAIL" or critical_count > 0:
+            overall_status = "NOT_READY"
+            status_label = "❌ Not Ready (Defects Detected)"
             status_color = "#EF4444"
-        elif high_count > 0:
+        elif completeness_status == "PARTIAL" or metadata_status == "PARTIAL" or high_count > 0:
             overall_status = "NEEDS_REVISION"
             status_label = "⚠️ Needs Revision"
             status_color = "#F59E0B"
-        elif not is_verified:
-            overall_status = "PENDING_HUMAN_SIGN_OFF"
+        elif verification_status != "VERIFIED":
+            overall_status = "NOT_READY"
             status_label = "🟡 Validated (Pending Sign-off)"
             status_color = "#3B82F6"
         else:
@@ -257,13 +335,69 @@ class EvidenceValidator:
             status_label = "🟢 Ready & Officially Verified"
             status_color = "#10B981"
 
+        # Multi-dimensional validation score (0.0 to 100.0)
+        v_score = 0.0
+        v_score += 20.0 if existence_status == "PASS" else 0.0
+        v_score += 20.0 if relevance_status == "PASS" else (10.0 if relevance_status == "POSSIBLE" else 0.0)
+        v_score += min(max(completeness_score * 0.20, 0.0), 20.0)
+        v_score += 15.0 if recency_status == "PASS" else 0.0
+        v_score += 15.0 if format_status == "PASS" else 0.0
+        v_score += 10.0 if metadata_status == "PASS" else (5.0 if metadata_status == "PARTIAL" else 0.0)
+        validation_score = round(v_score, 1)
+
+        # Clean list of string warnings
+        warning_strings = [w["message"] for w in warnings]
+
+        # Criterion ID resolution
+        resolved_criterion_id = target_criterion_id or (applicable_criteria[0] if applicable_criteria else "UNMAPPED")
+
+        # Synthesized human-readable diagnostic explanation
+        reasons = []
+        if existence_status == "FAIL":
+            reasons.append("Empty/missing content")
+        if relevance_status == "FAIL":
+            reasons.append("Unmapped to criteria")
+        if completeness_status == "FAIL":
+            reasons.append(f"Low completeness ({completeness_score}%)")
+        if recency_status == "FAIL":
+            reasons.append(f"Expired recency ({doc_year_str})")
+        if format_status == "FAIL":
+            reasons.append(f"Disallowed format ({clean_fmt})")
+        if verification_status not in ["VERIFIED"]:
+            reasons.append(f"Verification {verification_status.lower()}")
+
+        reason_summary = f" Reason: {', '.join(reasons)}." if reasons else " All compliance benchmarks satisfied."
+        explanation = (
+            f"Evidence '{doc_id}' evaluation: Existence={existence_status}, "
+            f"Relevance={relevance_status} (Criterion: {resolved_criterion_id}), "
+            f"Completeness={completeness_status} ({round(completeness_score, 1)}%), "
+            f"Recency={recency_status} ({doc_year_str}), "
+            f"Format={format_status} ({clean_fmt}), "
+            f"Metadata={metadata_status}, "
+            f"Verification={verification_status}. "
+            f"Overall Gatekeeper Status: {overall_status} (Score: {validation_score}/100).{reason_summary}"
+        )
+
         return {
             "evidence_id": doc_id,
+            "criterion_id": resolved_criterion_id,
+            "existence_status": existence_status,
+            "relevance_status": relevance_status,
+            "completeness_status": completeness_status,
+            "recency_status": recency_status,
+            "format_status": format_status,
+            "metadata_status": metadata_status,
+            "verification_status": verification_status,
+            "overall_status": overall_status,
+            "validation_score": validation_score,
+            "explanation": explanation,
+            "warnings": warning_strings,
+            "validated_at": datetime.now().isoformat(),
+            # Preserved backwards-compatible fields
             "title": doc_title,
             "department": doc_dept,
             "academic_year": doc_year_str,
             "document_type": doc_type,
-            "overall_status": overall_status,
             "status_label": status_label,
             "status_color": status_color,
             "is_submission_ready": overall_status in ["READY_VERIFIED", "PENDING_HUMAN_SIGN_OFF"],
@@ -303,7 +437,7 @@ class EvidenceValidator:
                 }
             },
             "issues": issues,
-            "warnings": warnings,
+            "raw_warnings": warnings,
             "issues_count": len(issues),
             "warnings_count": len(warnings),
             "applicable_criteria": applicable_criteria

@@ -335,3 +335,22 @@ class AuditLogOut(AuditLogCreate):
     id: str
     timestamp: datetime
     model_config = ConfigDict(from_attributes=True)
+
+
+# --- Multi-Dimensional Evidence Validation Schemas ---
+class EvidenceValidationResult(BaseModel):
+    evidence_id: str
+    criterion_id: Optional[str] = None
+    existence_status: str
+    relevance_status: str
+    completeness_status: str
+    recency_status: str
+    format_status: str
+    metadata_status: str
+    verification_status: str
+    overall_status: str
+    validation_score: float = Field(..., ge=0.0, le=100.0)
+    explanation: str
+    warnings: List[str] = Field(default_factory=list)
+    validated_at: str
+    model_config = ConfigDict(from_attributes=True)

@@ -554,9 +554,37 @@ def export_pdf_dossier(framework: str = Query("NAAC", description="NAAC or NBA")
 
 @app.get("/api/validation/report")
 def get_validation_report(target_criterion_id: Optional[str] = None):
-    """Runs 6-dimensional validation pipeline on all evidence records."""
+    """Runs 7-dimensional validation pipeline on all evidence records."""
     ev_list = db.get_all_evidence() if db else evidence_store
     return evidence_validator.validate_evidence_batch(ev_list, target_criterion_id=target_criterion_id)
+
+
+@app.post("/api/evidence/{evidence_id}/validate")
+@app.get("/api/evidence/{evidence_id}/validate")
+def validate_single_evidence(
+    evidence_id: str,
+    target_criterion_id: Optional[str] = Query(None, description="Optional target criterion ID to evaluate relevance against")
+):
+    """
+    Evaluates an individual evidence record across 7 dimensions:
+    existence, relevance, completeness, recency, format, metadata, and human verification.
+    """
+    ev_list = db.get_all_evidence() if db else evidence_store
+    target_ev = next((e for e in ev_list if e.get("id") == evidence_id), None)
+    if not target_ev:
+        raise HTTPException(status_code=404, detail=f"Evidence with ID '{evidence_id}' not found")
+    return evidence_validator.validate_evidence_record(target_ev, target_criterion_id=target_criterion_id)
+
+
+@app.post("/api/evidence/validate")
+def validate_arbitrary_evidence(
+    evidence_payload: Dict[str, Any] = Body(...),
+    target_criterion_id: Optional[str] = Query(None)
+):
+    """
+    Evaluates arbitrary evidence payload across the 7 validation dimensions without persistence.
+    """
+    return evidence_validator.validate_evidence_record(evidence_payload, target_criterion_id=target_criterion_id)
 
 
 @app.get("/api/scanner/run")

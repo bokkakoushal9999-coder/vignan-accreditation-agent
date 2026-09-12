@@ -69,7 +69,7 @@ class SubmissionPackageBuilder:
                     "item_id": rec["evidence_id"],
                     "message": f"Document '{rec['title']}' requires revision: {rec['issues'][0]['message'] if rec['issues'] else 'Format/quality defects present'}."
                 })
-            elif rec["overall_status"] == "PENDING_HUMAN_SIGN_OFF":
+            elif rec["overall_status"] in ["PENDING_HUMAN_SIGN_OFF", "NOT_READY"] or rec.get("verification_status") != "VERIFIED":
                 unverified_count += 1
                 blocking_issues.append({
                     "category": "Human Verification Sign-Off",

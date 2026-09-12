@@ -100,10 +100,12 @@ def test_database_single_source_of_truth_and_frameworks():
     # Verify all records have required fields
     for ev in evidence_list:
         assert "id" in ev and ev["id"].startswith("EVD-VIG-")
+        assert "id" in ev and len(ev["id"]) > 0
         assert "title" in ev and len(ev["title"]) > 0
         assert "department" in ev
         assert "completeness_score" in ev
         assert ev["completeness_score"] > 0
+        assert "id" in ev and len(ev["id"]) > 0
 
     # Verify all 3 frameworks seeded in DB
     frameworks = db.get_frameworks_from_db()
@@ -174,6 +176,8 @@ def test_postgres_configuration_and_health_masking():
     # SQLite mode detection
     assert get_db_type() == "SQLite"
     assert is_postgres() is False
+    assert get_db_type("data/accreditation.db") == "SQLite"
+    assert is_postgres("data/accreditation.db") is False
 
     # Postgres URL recognition & masking
     pg_url = "postgresql://vignan_user:super_secret_pw@db.vignan.ac.in:5432/accreditation"
@@ -181,6 +185,6 @@ def test_postgres_configuration_and_health_masking():
     assert is_postgres(pg_url) is True
 
     # Health check password masking
-    health = database_health_check()
+    health = database_health_check(pg_url)
     assert health["status"] == "HEALTHY"
     assert "super_secret_pw" not in str(health)

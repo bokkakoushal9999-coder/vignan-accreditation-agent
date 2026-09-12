@@ -40,6 +40,7 @@ from core.seed_database import seed_demo_data
 class TestAccreditationDatabase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.old_db_path = os.environ.get("ACCREDITATION_DB_PATH")
         cls.temp_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         cls.test_db_path = os.path.join(cls.temp_dir.name, "test_accreditation.db")
         os.environ["ACCREDITATION_DB_PATH"] = cls.test_db_path
@@ -47,6 +48,10 @@ class TestAccreditationDatabase(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        if cls.old_db_path is not None:
+            os.environ["ACCREDITATION_DB_PATH"] = cls.old_db_path
+        else:
+            os.environ.pop("ACCREDITATION_DB_PATH", None)
         try:
             cls.temp_dir.cleanup()
         except Exception:

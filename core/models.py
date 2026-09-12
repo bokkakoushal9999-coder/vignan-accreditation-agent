@@ -84,7 +84,7 @@ class Evidence(Base):
     """TABLE 4: Stores all uploaded institutional accreditation evidence documents."""
     __tablename__ = "evidence"
 
-    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = Column(String(36), primary_key=True, default=lambda: f"EVD-VIG-{uuid.uuid4().hex[:8].upper()}")
     filename = Column(String(255), nullable=False, index=True)
     original_filename = Column(String(255), nullable=False)
     file_type = Column(String(50), default="PDF")

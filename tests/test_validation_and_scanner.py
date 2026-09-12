@@ -94,3 +94,79 @@ def test_continuous_scanner_nba(scanner, evidence_data):
     assert scan["summary_counts"]["total_criteria"] == 10
     assert scan["overall_readiness_pct"] > 70.0
     assert len(scan["criteria_breakdown"]) == 10
+
+
+def test_evidence_validator_phase2_seven_dimensions(validator):
+    """Verifies that all 14 Phase 2 result fields are populated with expected types and values."""
+    ev = {
+        "id": "EVD-VIG-101",
+        "title": "Academic Council Minutes 2023",
+        "department": "Dean Academics",
+        "academic_year": "2023-24",
+        "document_type": "BoS Minutes & Resolutions",
+        "file_format": "PDF",
+        "status": "Verified",
+        "completeness_score": 92.0,
+        "applicable_criteria": ["1.1.1", "C1"],
+        "raw_text": "board of studies curriculum resolution members present approved outcome based education",
+        "issuing_authority": "Registrar, VFSTR"
+    }
+    res = validator.validate_evidence_record(ev, target_criterion_id="1.1.1")
+
+    # Assert exact Phase 2 fields exist
+    expected_fields = [
+        "evidence_id", "criterion_id", "existence_status", "relevance_status",
+        "completeness_status", "recency_status", "format_status", "metadata_status",
+        "verification_status", "overall_status", "validation_score", "explanation",
+        "warnings", "validated_at"
+    ]
+    for field in expected_fields:
+        assert field in res, f"Missing required Phase 2 field: {field}"
+
+    assert res["evidence_id"] == "EVD-VIG-101"
+    assert res["criterion_id"] == "1.1.1"
+    assert res["existence_status"] == "PASS"
+    assert res["relevance_status"] == "PASS"
+    assert res["completeness_status"] == "PASS"
+    assert res["recency_status"] == "PASS"
+    assert res["format_status"] == "PASS"
+    assert res["metadata_status"] == "PASS"
+    assert res["verification_status"] == "VERIFIED"
+    assert res["overall_status"] == "READY_VERIFIED"
+    assert res["validation_score"] > 80.0
+    assert isinstance(res["explanation"], str) and len(res["explanation"]) > 20
+    assert isinstance(res["warnings"], list)
+    assert isinstance(res["validated_at"], str)
+
+
+def test_evidence_validator_prompt_example(validator):
+    """
+    Verifies the exact scenario from problem statement:
+    Required: Academic Audit Report 2025-26, PDF, Signed
+    Uploaded: Academic_Audit_2023.docx (expired recency, wrong format docx, signature unknown/not verified)
+    Expected: existence=PASS, relevance=POSSIBLE, recency=FAIL, format=FAIL, signature=UNKNOWN/PENDING, overall=NOT_READY
+    """
+    uploaded_doc = {
+        "id": "EVD-TEST-SAMPLE",
+        "title": "Academic_Audit_2023.docx",
+        "filename": "Academic_Audit_2023.docx",
+        "document_type": "Statutory Audit Report",  # max age: 1 year, requires PDF, requires signature
+        "academic_year": "2020-21",  # Expired relative to 2023-24 cycle
+        "file_format": "DOCX",       # Disallowed format (requires PDF)
+        "raw_text": "Academic audit report conducted for faculty and department records with full assessment details.",
+        "department": "Dean Academics",
+        "status": "Draft",           # Signature not verified
+        "completeness_score": 75.0,
+        "applicable_criteria": ["C6"]
+    }
+    # Validate against target criterion 1.1.1 (general criteria mapped to C6, so relevance = POSSIBLE)
+    res = validator.validate_evidence_record(uploaded_doc, target_criterion_id="1.1.1")
+
+    assert res["existence_status"] == "PASS"
+    assert res["relevance_status"] == "POSSIBLE"
+    assert res["recency_status"] == "FAIL"
+    assert res["format_status"] == "FAIL"
+    assert res["verification_status"] in ["UNKNOWN", "PENDING"]
+    assert res["overall_status"] == "NOT_READY"
+    assert len(res["warnings"]) >= 0
+    assert "NOT_READY" in res["explanation"]

@@ -42,6 +42,7 @@ def test_submission_builder_numbered_annexures(builder, evidence_data):
     assert "SHA256:" in package["annexures"][0]["verification_hash"]
     assert "Annexure Code" in package["evidence_index_csv"]
     assert len(package["criterion_cross_ref"]) > 0
+    assert package["institutional_seal"] == "OFFICIALLY CERTIFIED BY VFSTR IQAC & REGISTRAR"
 
 
 def test_submission_builder_gatekeeper(builder, evidence_data):
@@ -56,6 +57,7 @@ def test_submission_builder_gatekeeper(builder, evidence_data):
     assert validation["is_cleared"] is False
     assert validation["gatekeeper_status"] == "BLOCKED"
     assert validation["total_blocking_issues"] >= 2
+    assert any(iss["category"] == "Human Verification Sign-Off" for iss in validation["blocking_issues"])
 
 
 def test_mock_visit_engine_retrieval(mock_visit):
