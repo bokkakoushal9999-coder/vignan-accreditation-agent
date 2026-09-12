@@ -3,6 +3,7 @@ Task Manager Engine:
 - Manages corrective remediation tasks for identified accreditation gaps
 - Supports status transitions (Open -> In Progress -> In Review -> Resolved)
 - Assigns institutional owners, deadlines, priority levels, and evidence attachments
+- Seamlessly integrates with SQLite database backend (data/accreditation.db)
 """
 
 import uuid
@@ -58,45 +59,45 @@ DEFAULT_VIGNAN_TASKS: List[Dict[str, Any]] = [
     },
     {
         "id": "TSK-VIG-004",
-        "title": "Publish Comprehensive CO-PO Attainment Gap Remediation Report for Batch 2024",
-        "metric_id": "2.6.2",
+        "title": "Authenticate Doctoral Degree Equivalence for 14 New Faculty Joinees",
+        "metric_id": "2.4.2",
         "criterion_id": "C2",
-        "owner": "Dr. K. Ramamohan (Director IQAC)",
-        "priority": "Critical",
-        "status": "In Progress",
+        "owner": "Dr. N. Veeranjaneyulu (Dean Academics)",
+        "priority": "High",
+        "status": "Open",
         "deadline": (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d"),
-        "estimated_days": 12,
-        "action_plan": "Synthesize Program Assessment Committee (PAC) gap action plans for PO4 (Investigation of Complex Problems) across ECE and Mechanical departments.",
-        "attached_evidence_id": "EVD-VIG-206",
-        "created_date": "2024-09-01",
-        "resolution_notes": "ECE PAC report completed; waiting for Mechanical final review."
+        "estimated_days": 10,
+        "action_plan": "Collect authenticated UGC equivalence verification letters for 14 newly recruited faculty members holding doctorates from overseas/interdisciplinary universities.",
+        "attached_evidence_id": "EVD-VIG-202",
+        "created_date": "2024-09-03",
+        "resolution_notes": ""
     },
     {
         "id": "TSK-VIG-005",
-        "title": "Collect Counter-Signed Attendance Registers for Skill Certification Batch 2",
-        "metric_id": "1.3.2",
-        "criterion_id": "C1",
-        "owner": "Dr. N. Veeranjaneyulu (Dean Academics)",
+        "title": "Audit Captive Solar Rooftop Net-Metering Settlement Statement (1.2 MW)",
+        "metric_id": "7.1.2",
+        "criterion_id": "C7",
+        "owner": "Er. K. Sambasiva Rao (Estate Officer)",
         "priority": "Medium",
-        "status": "Resolved",
-        "deadline": (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d"),
-        "estimated_days": 3,
-        "action_plan": "Obtain physical counter-signatures from Biotechnology HoD on student attendance rosters for EV Powertrain & Bioinformatics certificate courses.",
-        "attached_evidence_id": "EVD-VIG-103",
-        "created_date": "2024-08-20",
-        "resolution_notes": "All 4 attendance registers counter-signed and scanned copy uploaded to digital evidence locker."
+        "status": "In Progress",
+        "deadline": (datetime.now() + timedelta(days=14)).strftime("%Y-%m-%d"),
+        "estimated_days": 7,
+        "action_plan": "Reconcile Andhra Pradesh Southern Power Distribution Company Ltd (APSPDCL) quarterly net metering billing settlement records for 1.2 MW campus solar installation.",
+        "attached_evidence_id": "EVD-VIG-701",
+        "created_date": "2024-09-04",
+        "resolution_notes": "APSPDCL DISCOM statement received for Q1 & Q2. Reconciling Q3 solar credit."
     },
     {
         "id": "TSK-VIG-006",
-        "title": "Secure AIU Seal Verification Copies for 3 National Taekwondo Medals",
-        "metric_id": "5.3.1",
+        "title": "Complete Formal Financial Assistance Receipts for 380 Rural Girl Students",
+        "metric_id": "5.1.2",
         "criterion_id": "C5",
         "owner": "Dr. M. S. S. Rukmini (Dean Student Affairs)",
-        "priority": "Low",
+        "priority": "High",
         "status": "Open",
-        "deadline": (datetime.now() + timedelta(days=25)).strftime("%Y-%m-%d"),
-        "estimated_days": 15,
-        "action_plan": "Send formal representation to Association of Indian Universities (AIU) Sports Division, New Delhi for authenticated copies with official seal.",
+        "deadline": (datetime.now() + timedelta(days=18)).strftime("%Y-%m-%d"),
+        "estimated_days": 12,
+        "action_plan": "Compile counter-signed institutional fee-concession ledgers and bank disbursement registers for 380 underprivileged girl student scholars (INR 42.8 Lakhs).",
         "attached_evidence_id": "EVD-VIG-503",
         "created_date": "2024-09-04",
         "resolution_notes": ""
@@ -135,11 +136,58 @@ DEFAULT_VIGNAN_TASKS: List[Dict[str, Any]] = [
 
 
 class TaskManager:
-    def __init__(self, initial_tasks: Optional[List[Dict[str, Any]]] = None):
-        self._tasks: List[Dict[str, Any]] = list(initial_tasks or DEFAULT_VIGNAN_TASKS)
+    """
+    Manages accreditation remediation tasks with dual-mode support:
+    - Persistent SQLite database mode via DatabaseManager (data/accreditation.db)
+    - Fallback in-memory mode for standalone testing and disconnected states
+    """
+
+    def __init__(
+        self,
+        initial_tasks: Optional[List[Dict[str, Any]]] = None,
+        use_db: bool = True,
+        db_path: Optional[str] = None,
+        *args,
+        **kwargs
+    ):
+        self.use_db = use_db
+        self.db = None
+        self._tasks: List[Dict[str, Any]] = []
+
+        if initial_tasks is not None:
+            self._tasks = list(initial_tasks)
+        elif self.use_db:
+            try:
+                from core.database import get_database
+                self.db = get_database(db_path)
+                db_tasks = self.db.get_all_tasks()
+                if db_tasks:
+                    self._tasks = db_tasks
+                else:
+                    self._tasks = list(DEFAULT_VIGNAN_TASKS)
+            except Exception:
+                self.db = None
+                self._tasks = list(DEFAULT_VIGNAN_TASKS)
+        else:
+            self._tasks = list(DEFAULT_VIGNAN_TASKS)
 
     def get_all_tasks(self) -> List[Dict[str, Any]]:
+        """Retrieves all tasks from the SQLite database or in-memory list."""
+        if self.use_db and self.db:
+            try:
+                db_tasks = self.db.get_all_tasks()
+                if db_tasks:
+                    self._tasks = db_tasks
+            except Exception:
+                pass
         return list(self._tasks)
+
+    def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """Finds a single task by ID."""
+        for t in self.get_all_tasks():
+            if t.get("id") == task_id:
+                return dict(t)
+        return None
 
     def add_task(
         self,
@@ -151,9 +199,11 @@ class TaskManager:
         deadline: str = "",
         estimated_days: int = 7,
         action_plan: str = "",
-        attached_evidence_id: Optional[str] = None
+        attached_evidence_id: Optional[str] = None,
+        *args,
+        **kwargs
     ) -> Dict[str, Any]:
-        """Creates and stores a new remediation task."""
+        """Creates and persists a new remediation task."""
         task_id = f"TSK-VIG-{str(uuid.uuid4())[:6].upper()}"
         if not deadline:
             deadline = (datetime.now() + timedelta(days=estimated_days)).strftime("%Y-%m-%d")
@@ -163,33 +213,71 @@ class TaskManager:
             "title": title,
             "metric_id": metric_id,
             "criterion_id": criterion_id,
-            "owner": owner,
-            "priority": priority,
+            "owner": owner or "Director IQAC",
+            "owner_role": owner or "Director IQAC",
+            "owner_department": "IQAC",
+            "priority": priority or "High",
             "status": "Open",
             "deadline": deadline,
             "estimated_days": estimated_days,
-            "action_plan": action_plan,
+            "action_plan": action_plan or "Remediate identified compliance gap.",
             "attached_evidence_id": attached_evidence_id or "",
             "created_date": datetime.now().strftime("%Y-%m-%d"),
-            "resolution_notes": ""
+            "resolution_notes": "",
+            "completion_percentage": 0.0
         }
-        self._tasks.insert(0, new_task)
+
+        if self.use_db and self.db:
+            try:
+                self.db.insert_task(new_task)
+                self._tasks = self.db.get_all_tasks()
+            except Exception:
+                self._tasks.insert(0, new_task)
+        else:
+            self._tasks.insert(0, new_task)
+
         return new_task
 
     def update_task_status(
         self,
         task_id: str,
         new_status: str,
-        resolution_notes: Optional[str] = None
+        resolution_notes: Optional[str] = None,
+        *args,
+        **kwargs
     ) -> bool:
-        """Updates the status and resolution notes of a task."""
+        """Updates the status and resolution notes of a task in SQLite."""
+        if self.use_db and self.db:
+            try:
+                notes = resolution_notes or ""
+                success = self.db.update_task_status(task_id, new_status, notes)
+                self._tasks = self.db.get_all_tasks()
+                if success:
+                    return True
+            except Exception:
+                pass
+
+        # Fallback local update
         for t in self._tasks:
-            if t["id"] == task_id:
+            if t.get("id") == task_id:
                 t["status"] = new_status
                 if resolution_notes is not None:
                     t["resolution_notes"] = resolution_notes
                 return True
         return False
+
+    def delete_task(self, task_id: str) -> bool:
+        """Deletes a task by ID."""
+        if self.use_db and self.db:
+            try:
+                success = self.db.delete_task(task_id)
+                self._tasks = self.db.get_all_tasks()
+                return success
+            except Exception:
+                pass
+        orig_len = len(self._tasks)
+        self._tasks = [t for t in self._tasks if t.get("id") != task_id]
+        return len(self._tasks) < orig_len
 
     def filter_tasks(
         self,
@@ -198,26 +286,42 @@ class TaskManager:
         priority: Optional[str] = None,
         criterion_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Filters tasks by criteria."""
-        results = self._tasks
+        """Filters tasks by status, owner, priority, or criterion."""
+        results = self.get_all_tasks()
         if status and status != "All":
-            results = [t for t in results if t["status"] == status]
+            s_target = status.strip().lower().replace("_", " ")
+            results = [t for t in results if str(t.get("status", "")).strip().lower().replace("_", " ") == s_target]
         if owner and owner != "All":
-            results = [t for t in results if owner.lower() in t["owner"].lower()]
+            results = [t for t in results if owner.lower() in str(t.get("owner", "")).lower()]
         if priority and priority != "All":
-            results = [t for t in results if t["priority"] == priority]
+            results = [t for t in results if str(t.get("priority", "")).strip().lower() == priority.strip().lower()]
         if criterion_id and criterion_id != "All":
-            results = [t for t in results if t["criterion_id"] == criterion_id]
+            results = [t for t in results if str(t.get("criterion_id", "")).strip().lower() == criterion_id.strip().lower()]
         return results
 
     def get_task_statistics(self) -> Dict[str, Any]:
-        """Calculates summary KPIs for task board."""
-        total = len(self._tasks)
-        open_count = sum(1 for t in self._tasks if t["status"] == "Open")
-        in_progress = sum(1 for t in self._tasks if t["status"] == "In Progress")
-        in_review = sum(1 for t in self._tasks if t["status"] == "In Review")
-        resolved = sum(1 for t in self._tasks if t["status"] == "Resolved")
-        critical_count = sum(1 for t in self._tasks if t["priority"] == "Critical" and t["status"] != "Resolved")
+        """Calculates summary KPIs for the task board."""
+        tasks = self.get_all_tasks()
+        total = len(tasks)
+
+        def _norm(status_val):
+            return str(status_val or "").strip().upper().replace(" ", "_")
+
+        open_count = sum(1 for t in tasks if _norm(t.get("status")) in ["OPEN", "DRAFT", "PENDING"])
+        in_progress = sum(1 for t in tasks if _norm(t.get("status")) in ["IN_PROGRESS", "PROGRESS", "ACTIVE"])
+        in_review = sum(1 for t in tasks if _norm(t.get("status")) in ["IN_REVIEW", "REVIEW", "UNDER_REVIEW"])
+        resolved = sum(1 for t in tasks if _norm(t.get("status")) in ["RESOLVED", "COMPLETED", "CLOSED"])
+
+        # Any remaining tasks not matching the above buckets get counted as open
+        categorized = open_count + in_progress + in_review + resolved
+        if categorized < total:
+            open_count += (total - categorized)
+
+        critical_count = sum(
+            1 for t in tasks
+            if str(t.get("priority", "")).strip().lower() == "critical"
+            and _norm(t.get("status")) not in ["RESOLVED", "COMPLETED", "CLOSED"]
+        )
 
         return {
             "total_tasks": total,
@@ -225,6 +329,6 @@ class TaskManager:
             "in_progress": in_progress,
             "in_review": in_review,
             "resolved": resolved,
-            "resolution_rate_pct": round((resolved / total * 100.0) if total > 0 else 0, 1),
+            "resolution_rate_pct": round((resolved / total * 100.0) if total > 0 else 0.0, 1),
             "critical_pending": critical_count
         }

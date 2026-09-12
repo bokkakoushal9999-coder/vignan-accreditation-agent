@@ -1,0 +1,27 @@
+# VFSTR AI Accreditation Academic Agent - Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# --- Core Framework & API ---
+streamlit>=1.35.0
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+
+# --- Database & ORM ---
+SQLAlchemy>=2.0.0
+psycopg2-binary>=2.9.9
+
+# --- Data Science & Visualization ---
+numpy>=1.26.0
+pandas>=2.2.0
+plotly>=5.20.0
+scikit-learn>=1.4.0
+
+# --- PDF Generation ---
+fpdf2>=2.7.9
+
+# --- HTTP Client ---
+requests>=2.31.0
+
+# --- Utilities ---
+python-multipart>=0.0.9
+anyio>=4.3.0

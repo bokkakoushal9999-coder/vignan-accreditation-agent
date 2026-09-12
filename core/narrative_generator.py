@@ -15,8 +15,8 @@ class NarrativeGenerator:
 
     def generate_metric_narrative(
         self,
-        metric: Dict[str, Any],
-        mapped_evidence: List[Dict[str, Any]],
+        metric: Any,
+        mapped_evidence: Optional[List[Dict[str, Any]]] = None,
         framework: str = "NAAC",
         focus_tone: str = "Executive & Evidence-Backed",
         additional_notes: str = ""
@@ -24,12 +24,38 @@ class NarrativeGenerator:
         """
         Drafts a comprehensive, formal SSR / SAR narrative section for a specific Qualitative or Quantitative metric.
         """
-        m_id = metric.get("id", "")
-        m_name = metric.get("name", "")
-        m_desc = metric.get("description", "")
-        weight = metric.get("weight", 20)
-        crit_id = metric.get("criterion_id", "")
-        crit_name = metric.get("criterion_name", "")
+        if mapped_evidence is None:
+            mapped_evidence = []
+
+        if isinstance(metric, str):
+            metric_id_str = metric
+            metric_dict = {"id": metric_id_str, "name": f"Metric {metric_id_str}", "description": "", "weight": 20}
+        else:
+            metric_dict = dict(metric)
+
+        m_id = metric_dict.get("id", "")
+        m_name = metric_dict.get("name", "")
+        m_desc = metric_dict.get("description", "")
+        weight = metric_dict.get("weight", 20)
+        crit_id = metric_dict.get("criterion_id", "")
+        crit_name = metric_dict.get("criterion_name", "")
+
+        if not crit_id or not crit_name:
+            try:
+                from core.criteria_registry import get_framework_criteria
+            except (ImportError, ModuleNotFoundError):
+                try:
+                    from criteria_registry import get_framework_criteria
+                except Exception:
+                    get_framework_criteria = None
+            if get_framework_criteria:
+                crit_dict = get_framework_criteria(framework)
+                for c_key, c_val in crit_dict.items():
+                    if m_id in c_val.get("metrics", {}):
+                        crit_id = crit_id or c_key
+                        crit_name = crit_name or c_val.get("name", f"Criterion {c_key}")
+                        m_name = m_name if m_name != f"Metric {m_id}" else c_val["metrics"][m_id]["name"]
+                        break
 
         # Synthesize evidence references
         doc_citations = []
@@ -53,8 +79,8 @@ class NarrativeGenerator:
 
 **Criterion**: {crit_name} ({crit_id})  
 **Metric Reference**: `{m_id}` — **{m_name}**  
-**Metric Weightage**: `{weight} Points` | **Evaluation Type**: `{metric.get('type', 'QlM')}`  
-**Target Benchmark**: `{metric.get('benchmark', 3.8)}` | **Assessment Cycle**: `2020-2025`  
+**Metric Weightage**: `{weight} Points` | **Evaluation Type**: `{metric_dict.get('type', 'QlM')}`  
+**Target Benchmark**: `{metric_dict.get('benchmark', 3.8)}` | **Assessment Cycle**: `2020-2025`  
 **Generated On**: `{datetime.now().strftime('%d %B %Y, %I:%M %p')}`
 
 ---
@@ -159,3 +185,45 @@ The university operates a 1.0 MW rooftop solar photovoltaic plant generating 42%
 
         else:
             return f"""The institutional practices governing {metric_name} at VFSTR are systematically documented, approved by statutory bodies, and continuously monitored by the Internal Quality Assurance Cell (IQAC). Operational procedures are executed in compliance with national accreditation mandates, ensuring high data fidelity, equitable student access, and verifiable quality benchmarks."""
+
+    # Method alias for API convenience
+    generate_narrative = generate_metric_narrative
+
+
+if __name__ == "__main__":
+    import sys
+    if sys.platform == "win32":
+        sys.stdout.reconfigure(encoding="utf-8")
+
+    generator = NarrativeGenerator()
+    sample_evidence = [
+        {
+            "id": "DOC-C1-001",
+            "title": "Minutes of 24th Academic Council Meeting on NEP 2020 OBE Framework",
+            "department": "Dean Academics",
+            "academic_year": "2023-24",
+            "issuing_authority": "Registrar, VFSTR",
+            "status": "Verified"
+        },
+        {
+            "id": "DOC-C1-004",
+            "title": "Board of Studies (BoS) Consolidated Approvals & PO-PSO Mapping Report",
+            "department": "CSE & ECE",
+            "academic_year": "2023-24",
+            "issuing_authority": "Dean Academics",
+            "status": "Verified"
+        }
+    ]
+
+    result = generator.generate_metric_narrative(
+        metric="1.1.1",
+        mapped_evidence=sample_evidence,
+        framework="NAAC"
+    )
+
+    print("=" * 70)
+    print("NARRATIVE GENERATOR DEMO OUTPUT")
+    print(f"Metric: {result['metric_id']} - {result['metric_name']}")
+    print(f"Word Count: {result['word_count']} words | Evidence Citations: {result['citations_count']}")
+    print("=" * 70)
+    print(result["markdown_content"])

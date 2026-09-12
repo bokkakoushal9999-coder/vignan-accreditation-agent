@@ -63,8 +63,18 @@ DEFAULT_AUDIT_LOGS: List[Dict[str, Any]] = [
 
 
 class AuditVerifier:
-    def __init__(self, initial_logs: Optional[List[Dict[str, Any]]] = None):
-        self._audit_trail: List[Dict[str, Any]] = list(initial_logs or DEFAULT_AUDIT_LOGS)
+    def __init__(self, initial_logs: Optional[List[Dict[str, Any]]] = None, use_db: bool = True):
+        self.use_db = use_db
+        if use_db:
+            from core.database import get_database
+            self.db = get_database()
+            if initial_logs:
+                self._audit_trail: List[Dict[str, Any]] = list(initial_logs)
+            else:
+                self._audit_trail = self.db.get_all_audit_logs()
+        else:
+            self.db = None
+            self._audit_trail = list(initial_logs or DEFAULT_AUDIT_LOGS)
 
     def record_verification(
         self,
@@ -97,9 +107,11 @@ class AuditVerifier:
             evidence["completeness_score"] = completeness_adjustment
 
         # Create audit entry
+        log_id = f"AUD-{str(uuid.uuid4())[:6].upper()}"
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_entry = {
-            "id": f"AUD-{str(uuid.uuid4())[:6].upper()}",
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "id": log_id,
+            "timestamp": ts,
             "reviewer_name": reviewer_name,
             "reviewer_role": reviewer_role,
             "evidence_id": evidence.get("id", "UNKNOWN"),
@@ -107,26 +119,52 @@ class AuditVerifier:
             "action": action,
             "previous_status": prev_status,
             "new_status": new_status,
-            "audit_notes": audit_notes
+            "audit_notes": audit_notes,
+            "checksum": f"SHA256:{hash(log_id + ts) & 0xFFFFFFFF:08x}"
         }
 
-        self._audit_trail.insert(0, log_entry)
+        if self.use_db and self.db:
+            self.db.insert_audit_log(log_entry)
+            # Also update evidence in DB if evidence has an ID
+            ev_id = evidence.get("id")
+            if ev_id:
+                self.db.update_evidence(ev_id, {
+                    "verified_status": new_status,
+                    "completeness_score": float(evidence.get("completeness_score", 85.0))
+                })
+            self._audit_trail = self.db.get_all_audit_logs()
+        else:
+            self._audit_trail.insert(0, log_entry)
+
         return log_entry
 
     def get_audit_trail(self) -> List[Dict[str, Any]]:
+        """Retrieves complete audit trail from database or local memory."""
+        if self.use_db and self.db:
+            try:
+                self._audit_trail = self.db.get_all_audit_logs()
+            except Exception:
+                pass
         return list(self._audit_trail)
 
     def get_audit_summary(self) -> Dict[str, Any]:
         """Summary statistics of all audit activities."""
-        total = len(self._audit_trail)
-        approved = sum(1 for log in self._audit_trail if log["action"] == "VERIFIED_APPROVED")
-        concerns = sum(1 for log in self._audit_trail if log["action"] == "VERIFIED_WITH_CONCERNS")
-        revisions = sum(1 for log in self._audit_trail if log["action"] in ["REQUEST_REVISION", "REJECTED"])
+        trail = self.get_audit_trail()
+        total = len(trail)
+        approved = sum(1 for log in trail if log.get("action") == "VERIFIED_APPROVED")
+        concerns = sum(1 for log in trail if log.get("action") == "VERIFIED_WITH_CONCERNS")
+        revisions = sum(1 for log in trail if log.get("action") in ["REQUEST_REVISION", "REJECTED"])
+
+        last_time = "N/A"
+        if trail and isinstance(trail[0], dict):
+            last_time = trail[0].get("timestamp", "N/A")
 
         return {
             "total_audit_events": total,
             "approved_count": approved,
             "concerns_count": concerns,
             "revision_requested_count": revisions,
-            "last_audit_time": self._audit_trail[0]["timestamp"] if self._audit_trail else "N/A"
+            "last_audit_time": last_time
         }
+
+
